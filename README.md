@@ -311,4 +311,4 @@ Apache 2.0
 
 ## Author
 
-Made with ❤️ for the community by [Martí Castany](https://www.linkedin.com/in/marti-castany/)
+Made with ❤️ for the Community by [Martí Castany](https://www.linkedin.com/in/marti-castany/)
