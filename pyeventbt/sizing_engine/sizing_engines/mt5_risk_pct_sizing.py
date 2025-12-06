@@ -38,7 +38,10 @@ class MT5RiskPctSizing(ISizingEngine):
             from pyeventbt.broker.mt5_broker.mt5_simulator_wrapper import Mt5SimulatorWrapper as mt5
         else:
             check_platform_compatibility()
-            import MetaTrader5 as mt5
+            try:
+                import MetaTrader5 as mt5
+            except ImportError:
+                mt5 = None
         
         self.mt5 = mt5
         self.risk_pct = configs.risk_pct

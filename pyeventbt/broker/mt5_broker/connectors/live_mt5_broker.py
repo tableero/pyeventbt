@@ -10,8 +10,13 @@ Licensed under the Apache License, Version 2.0
 
 from pyeventbt.utils.utils import check_platform_compatibility
 
-if check_platform_compatibility(raise_exception=False):
-    import MetaTrader5 as mt5
+try:
+    if check_platform_compatibility(raise_exception=False):
+        import MetaTrader5 as mt5
+    else:
+        mt5 = None
+except ImportError:
+    mt5 = None
 
 from pyeventbt.broker.mt5_broker.core.entities.order_send_result import OrderSendResult
 from pyeventbt.utils.utils import Utils

@@ -26,8 +26,13 @@ import logging
 
 logger = logging.getLogger("pyeventbt")
 
-if check_platform_compatibility(raise_exception=False):
-    import MetaTrader5 as mt5
+try:
+    if check_platform_compatibility(raise_exception=False):
+        import MetaTrader5 as mt5
+    else:
+        mt5 = None
+except ImportError:
+    mt5 = None
 
 class Mt5LiveDataProvider(IDataProvider):
     """
