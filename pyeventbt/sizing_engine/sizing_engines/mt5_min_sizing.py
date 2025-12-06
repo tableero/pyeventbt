@@ -34,7 +34,10 @@ class MT5MinSizing(ISizingEngine):
             from pyeventbt.broker.mt5_broker.mt5_simulator_wrapper import Mt5SimulatorWrapper as mt5
         else:
             check_platform_compatibility()
-            import MetaTrader5 as mt5
+            try:
+                import MetaTrader5 as mt5
+            except ImportError:
+                mt5 = None
         self.mt5 = mt5
     
     def get_suggested_order(self, signal_event: SignalEvent, *args, **kwargs) -> SuggestedOrder:

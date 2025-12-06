@@ -24,8 +24,13 @@ from pyeventbt.portfolio.core.entities.pending_order import PendingOrder
 import time
 import logging
 
-if check_platform_compatibility(raise_exception=False):
-    import MetaTrader5 as mt5
+try:
+    if check_platform_compatibility(raise_exception=False):
+        import MetaTrader5 as mt5
+    else:
+        mt5 = None
+except ImportError:
+    mt5 = None
 
 logger = logging.getLogger("pyeventbt")
 
