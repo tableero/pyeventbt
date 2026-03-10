@@ -276,7 +276,7 @@ backtest = strategy.backtest(
     backtest_name=strategy_id,
     start_date=from_date,
     end_date=to_date,
-    export_backtest_csv=True
+    export_backtest_csv=True,
     export_backtest_parquet=False,
     account_currency='USD'
 )

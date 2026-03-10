@@ -135,12 +135,12 @@ class MT5RiskPctSizing(ISizingEngine):
             entry_price: Decimal = signal_event.order_price
         
         # Get the symbol properties needed to accurately calculate the position size
-        equity                  = account_info.equity
-        volume_step             = symbol_info.volume_step               # the minimum volume change step when placing an order
-        tick_size               = symbol_info.trade_tick_size           # the smallest possible price change
-        contract_size           = symbol_info.trade_contract_size       # the size of 1 lot
-        account_currency        = account_info.currency                 # the account currency
-        symbol_profit_currency  = symbol_info.currency_profit           # the profit currency of the symbol
+        equity                  = Decimal(str(account_info.equity))
+        volume_step             = Decimal(str(symbol_info.volume_step))               # the minimum volume change step when placing an order
+        tick_size               = Decimal(str(symbol_info.trade_tick_size))           # the smallest possible price change
+        contract_size           = Decimal(str(symbol_info.trade_contract_size))       # the size of 1 lot
+        account_currency        = account_info.currency                               # the account currency
+        symbol_profit_currency  = symbol_info.currency_profit                         # the profit currency of the symbol
         
         tick_value_profit_ccy   = contract_size * tick_size    # Amount gained or losed for a full contract and a tick price move
         tick_value_account_ccy  = Utils.convert_currency_amount_to_another_currency(tick_value_profit_ccy, symbol_profit_currency, account_currency, modules.DATA_PROVIDER)
