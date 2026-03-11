@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /home/user/workspace/oruizrui/pyeventbt/docs/pyeventbt.risk_engine* /home/user/workspace/oruizrui/pyeventbt/docs/pyeventbt.execution_engine* 2>/dev/null | sort)"
+    ]
+  }
+}
