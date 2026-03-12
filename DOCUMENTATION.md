@@ -41,6 +41,8 @@
 32. [Architecture Comparison — Industry Research vs PyEventBT](docs/architecture_comparison.md)
 33. [Implementation Guide — From Design to Working Code](docs/implementation_guide.md)
 34. [Contract, Behavior & Protocol Diagrams](docs/cbp_diagrams.md)
+35. [Deployment Guide — Containerized Trading with Externalized State](docs/deployment_guide.md)
+36. [Packaging Guide — Python Library + Airflow Integration](docs/packaging_guide.md)
 
 ---
 
