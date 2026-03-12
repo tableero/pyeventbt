@@ -12,7 +12,7 @@
 | Field | Value |
 |---|---|
 | **Name** | pyeventbt |
-| **Version** | 0.0.4 |
+| **Version** | 0.0.5 |
 | **License** | Apache-2.0 |
 | **Authors** | Marti Castany, Alain Porto |
 | **Homepage** | https://github.com/marticastany/pyeventbt |
@@ -2065,3 +2065,90 @@ All "Requirements Derived" items from all documentation files, consolidated and 
 - RQ-PORD-001: A pending order must specify trigger price, order type, symbol, unique ticket, volume, and strategy ID.
 - RQ-PORD-002: Supported pending order types must include BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP.
 - RQ-PORD-003: Stop-loss, take-profit, and comment are optional metadata fields.
+
+---
+
+## 21. Technical Review — Dependencies, Architecture & Runtime Issues
+
+This section consolidates findings from a thorough code review performed 2026-03-12.
+
+### 21.1 Dependency Issues
+
+| ID | Severity | Description |
+|---|---|---|
+| DEP-01 | CRITICAL | `quantdle` used by `QuantdleDataUpdater` (exported in `__init__.py`) but missing from `pyproject.toml`. Only in `requirements.txt`. Users installing via `pip install pyeventbt` get `ImportError`. |
+| DEP-02 | MEDIUM | `scipy` and `scikit-learn` declared as dependencies with no clear usage in documented modules. Should be optional extras or removed. |
+| DEP-03 | MEDIUM | `matplotlib` only used by `BacktestResults.plot()`. Should be optional extra (`pip install pyeventbt[plot]`). |
+| DEP-04 | MEDIUM | `MetaTrader5` is optional (Windows-only) but no `[tool.poetry.extras]` section exists for `pip install pyeventbt[mt5]`. |
+| DEP-05 | MEDIUM | No `poetry.lock` committed — builds are non-deterministic. |
+| DEP-06 | MEDIUM | Poetry version not pinned in CI (`.github/workflows/release.yml` uses `version: latest`). |
+| DEP-07 | LOW | Version `0.0.5` in `pyproject.toml` but `0.0.4` in `REQUIREMENTS.md` and `DOCUMENTATION.md` header. |
+| DEP-08 | LOW | PyPI classifier says `Development Status :: 1 - Planning` despite functional code — should be `3 - Alpha` or `4 - Beta`. |
+
+### 21.2 Architecture Issues — Severity: CRITICAL
+
+| ID | File:Line | Description |
+|---|---|---|
+| ARCH-CRIT-01 | `shared_data.py:19-28` | `SharedData` is a class-level mutable singleton with zero thread safety. Multiple components read/write with no locks. |
+| ARCH-CRIT-02 | `mt5_simulator_execution_engine_connector.py:145-152` | Bypasses Pydantic validation via `SharedData.account_info.__dict__["balance"] = ...`. Direct `__dict__` mutation. |
+| ARCH-CRIT-03 | `trading_director.py:154,190` | No event validation before dispatch. `ScheduledEvent` type has no handler entry → `KeyError` crash. No exception handling around handlers. |
+| ARCH-CRIT-04 | `live_mt5_broker.py:210-232` | No reconnection logic, no retry, no circuit breaker, no graceful shutdown for live trading. |
+| ARCH-CRIT-05 | Entire codebase | No automated tests. All validation relies on running example scripts manually. |
+
+### 21.3 Architecture Issues — Severity: HIGH
+
+| ID | File:Line | Description |
+|---|---|---|
+| ARCH-HIGH-01 | `strategy.py:162-165, 195-198, 230-233` | Decorators do not return the decorated function. The function becomes `None` after decoration. |
+| ARCH-HIGH-02 | `mt5_simulator_execution_engine_connector.py:55-57` | `executed_deals` dict grows unbounded — never pruned. 10K+ objects for long backtests. |
+| ARCH-HIGH-03 | `portfolio.py:45-46` | `historical_balance` and `historical_equity` dicts grow unbounded. ~5.25M entries for 10-year 1-min backtest. |
+| ARCH-HIGH-04 | `mt5_live_data_connector.py:133, 239` | Bare `except:` catches `SystemExit` and `KeyboardInterrupt`. Cannot Ctrl+C during live trading. |
+| ARCH-HIGH-05 | `csv_data_connector.py:379-387` | Float64 multiply + `.floor()` loses precision. `1.12345 * 100000.0` → `112344.999999` → `112344`. |
+| ARCH-HIGH-06 | `trading_director.py:158-167` | End-of-backtest position closing has no timeout. If fill generation bugs, backtest hangs forever. |
+| ARCH-HIGH-07 | `strategy.py` | `end_date` default is `datetime.now()` evaluated at module load, not at call time. Mutable list defaults shared across calls. |
+
+### 21.4 Architecture Issues — Severity: MEDIUM
+
+| ID | File:Line | Description |
+|---|---|---|
+| ARCH-MED-01 | Multiple files | Decimal/float mixing: `SignalEvent.forecast` is float, other financial fields Decimal. Indicator properties return float, downstream wraps in `Decimal(str(...))`. |
+| ARCH-MED-02 | `mt5_simulator_execution_engine_connector.py:65-66, 242, 684` | Hardcoded magic numbers (ticket counters, commission rates, sentinel values) that should be configuration. |
+| ARCH-MED-03 | `indicators.py:555` | BollingerBands uses population variance (÷N) not sample variance (÷N-1). ~11% error on period=5. |
+| ARCH-MED-04 | Multiple files | 28+ `print()` mixed with `logger.*`. ANSI codes in log messages. No correlation IDs. No handler timing. |
+| ARCH-MED-05 | `csv_data_connector.py:252-325` | Eagerly loads all M1 data. Left join causes cartesian expansion. 50 symbols × 5 years can consume 3-5 GB RAM. |
+| ARCH-MED-06 | Multiple files | Interface compliance gaps: `IIndicator.compute()` not implemented by any indicator. `IRiskEngine.assess_order` signature differs between interface and service. Live ExecutionEngine `_update_values_and_check_executions_and_fills` is a no-op. |
+| ARCH-MED-07 | Multiple files | Dead code: 7 deprecated methods without markers, unused cache fields, duplicate imports, commented-out features. |
+| ARCH-MED-08 | `.github/workflows/release.yml` | No test step in CI pipeline. Code published to PyPI without automated verification. |
+
+### 21.5 Runtime Safety Issues (Live Trading)
+
+| ID | Scenario | Current Behavior | Expected Behavior |
+|---|---|---|---|
+| LIVE-01 | MT5 connection drops | No detection; next `update_bars()` crashes | Auto-reconnect with exponential backoff |
+| LIVE-02 | 10 consecutive order failures | System keeps retrying without limit | Circuit breaker after N failures, alert operator |
+| LIVE-03 | User presses Ctrl+C | Bare `except:` catches `KeyboardInterrupt` — cannot exit | Clean shutdown: close positions, disconnect, exit |
+| LIVE-04 | Exception in signal engine | Propagates to halt entire event loop | Log error, skip this bar, continue |
+| LIVE-05 | Exception in hook callback | Propagates to halt event loop | Log error, continue |
+| LIVE-06 | Deal confirmation delay | Blocks event loop for up to 5s (`time.sleep()`) | Async confirmation or timeout with alert |
+| LIVE-07 | Pending order fill detection | Live `_update_values_and_check_executions_and_fills` is `pass` (no-op) | Should check via `mt5.positions_get()` or poll |
+
+### 21.6 Numerical Precision Issues
+
+| ID | Location | Issue | Impact |
+|---|---|---|---|
+| NUM-01 | `csv_data_connector.py:379-387` | Float64 * Float64 + `floor()` loses least significant digit | Every bar price in every backtest |
+| NUM-02 | `indicators.py:72-97` | `Bar.close_f` returns `float` via integer division | Indicator inputs have IEEE 754 drift |
+| NUM-03 | `indicators.py:555` | Population std dev (÷N) instead of sample (÷N-1) | BollingerBands bands are too narrow |
+| NUM-04 | `mt5_simulator_execution_engine_connector.py:366-375` | Decimal SL/TP compared with float bar prices | SL/TP trigger may fire 1 tick early/late |
+| NUM-05 | `backtest_results.py:35` | `.astype(float)` on Decimal data | Lossy for high-precision values |
+| NUM-06 | `sizing_engine (RiskPct)` | Integer truncation on price distance | May underestimate SL distance → oversize position |
+| NUM-07 | `trade_archiver.py` | JSON export uses 5 decimal places, Parquet uses 6 | Inconsistent precision across formats |
+
+### 21.7 Recommended Fix Priority
+
+| Priority | Issues | Effort | Impact |
+|---|---|---|---|
+| **P0 — Before any deployment** | ARCH-CRIT-03 (event validation), DEP-01 (quantdle), ARCH-HIGH-04 (bare except) | Small | Prevents crashes, install failures |
+| **P1 — Next release** | ARCH-HIGH-01 (decorators), ARCH-HIGH-02/03 (memory), ARCH-HIGH-05 (float precision), ARCH-HIGH-06 (timeout) | Medium | Correctness, stability |
+| **P2 — Near term** | ARCH-CRIT-04 (reconnection), ARCH-MED-03 (BollingerBands), ARCH-MED-04 (logging), DEP-05/06 (CI) | Medium | Production safety, observability |
+| **P3 — Backlog** | ARCH-CRIT-01 (SharedData refactor), ARCH-CRIT-05 (tests), ARCH-MED-05 (memory), ARCH-MED-07 (dead code) | Large | Foundation for growth |

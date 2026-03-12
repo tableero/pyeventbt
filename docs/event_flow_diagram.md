@@ -235,6 +235,81 @@ flowchart LR
     style SCHEDULE fill:#4CAF50,color:#fff
 ```
 
+## Core Design Pattern (Portable)
+
+The following diagram shows the minimal, reusable pattern that underlies the full system. Any project can adopt this architecture by implementing these three layers:
+
+```mermaid
+flowchart TD
+    subgraph Pattern["Event-Driven Pattern — 3 Building Blocks"]
+        direction TB
+
+        subgraph Block1["1. Typed Events"]
+            E1["BarEvent"]
+            E2["SignalEvent"]
+            E3["OrderEvent"]
+            E4["FillEvent"]
+        end
+
+        subgraph Block2["2. Shared Queue"]
+            Q[("queue.Queue")]
+        end
+
+        subgraph Block3["3. Event Loop"]
+            LOOP["while running:\n  event = queue.get()\n  handlers[event.type](event)"]
+        end
+    end
+
+    E1 & E2 & E3 & E4 -->|"produced by components"| Q
+    Q -->|"consumed by"| LOOP
+    LOOP -->|"dispatches to handler\nthat may produce new events"| Q
+
+    style Q fill:#FFC107,color:#000
+    style LOOP fill:#2196F3,color:#fff
+    style E1 fill:#2196F3,color:#fff
+    style E2 fill:#FF9800,color:#fff
+    style E3 fill:#9C27B0,color:#fff
+    style E4 fill:#F44336,color:#fff
+```
+
+### Integration Points — What to Swap
+
+```mermaid
+flowchart LR
+    subgraph Swappable["Swap these for your domain"]
+        direction TB
+        DATA["Data Source\nCSV / API / WebSocket / DB"]
+        ALPHA["Signal Logic\nYour strategy / ML model"]
+        SIZE["Sizing Logic\nFixed / Risk-based / Custom"]
+        RISK["Risk Filters\nPassthrough / Custom rules"]
+        EXEC["Execution\nSimulator / Live broker"]
+    end
+
+    subgraph Fixed["Keep these unchanged"]
+        direction TB
+        QUEUE[("Shared Queue")]
+        DIRECTOR["Event Loop\n(dispatch by event.type)"]
+    end
+
+    DATA -->|"BarEvent"| QUEUE
+    QUEUE --> DIRECTOR
+    DIRECTOR -->|"BAR"| ALPHA
+    ALPHA -->|"SignalEvent"| QUEUE
+    DIRECTOR -->|"SIGNAL"| SIZE
+    SIZE -->|"SuggestedOrder"| RISK
+    RISK -->|"OrderEvent"| QUEUE
+    DIRECTOR -->|"ORDER"| EXEC
+    EXEC -->|"FillEvent"| QUEUE
+
+    style QUEUE fill:#FFC107,color:#000
+    style DIRECTOR fill:#FFC107,color:#000
+    style DATA fill:#81C784,color:#000
+    style ALPHA fill:#81C784,color:#000
+    style SIZE fill:#81C784,color:#000
+    style RISK fill:#81C784,color:#000
+    style EXEC fill:#81C784,color:#000
+```
+
 ## Event Lifecycle: Single Bar to Trade
 
 ```mermaid
@@ -284,4 +359,317 @@ sequenceDiagram
     Q->>TD: get() → FillEvent
     TD->>PH: process_fill_event(fill)
     PH->>TA: archive_trade(fill)
+```
+
+## Architecture Limitations: Coupling Points
+
+This diagram highlights the three coupling layers that prevent running components as independent processes.
+
+```mermaid
+flowchart TD
+    subgraph Coupling1["Coupling Layer 1: SharedData Singleton"]
+        SD[("SharedData\n(class-level static attributes)")]
+        EE_W["ExecutionEngine\nWRITES: balance, equity,\nmargin, margin_free"]
+        SZ_R["SizingEngine\nREADS: account_info.equity"]
+        DP_R["DataProvider\nREADS: symbol_info.digits"]
+        P_R["Portfolio\nREADS: via ExecutionEngine getters"]
+
+        EE_W -->|"mutates"| SD
+        SD -->|"read by"| SZ_R
+        SD -->|"read by"| DP_R
+        SD -->|"read by"| P_R
+    end
+
+    subgraph Coupling2["Coupling Layer 2: Modules Direct References"]
+        MOD["Modules object\n{DATA_PROVIDER, EXECUTION_ENGINE, PORTFOLIO}"]
+        CB["User Callbacks\n(@signal_engine, @run_every)"]
+        CB -->|".get_latest_bars()"| MOD
+        CB -->|".get_number_of_positions()"| MOD
+        CB -->|".close_short_positions()"| MOD
+    end
+
+    subgraph Coupling3["Coupling Layer 3: Synchronous Call Chains"]
+        PH2["PortfolioHandler"]
+        SZ2["SizingEngine"]
+        RE2["RiskEngine"]
+        PORT2["Portfolio"]
+        EE2["ExecutionEngine"]
+
+        PH2 -->|"sync call\nreturns SuggestedOrder"| SZ2
+        PH2 -->|"sync call\nmay queue OrderEvent"| RE2
+        PORT2 -->|"sync call\nreturns positions"| EE2
+        PORT2 -->|"sync call\nreturns balance"| EE2
+    end
+
+    style SD fill:#F44336,color:#fff
+    style MOD fill:#FF9800,color:#fff
+    style EE_W fill:#EF9A9A,color:#000
+    style SZ_R fill:#EF9A9A,color:#000
+    style DP_R fill:#EF9A9A,color:#000
+    style P_R fill:#EF9A9A,color:#000
+    style CB fill:#FFE0B2,color:#000
+```
+
+## Distributed Migration: Target Architecture
+
+How the same event flow looks when each component runs as a separate process with a message broker between them.
+
+```mermaid
+flowchart LR
+    subgraph P1["Process 1: DataProvider"]
+        DP3["DataProvider\n(CSV / API / WebSocket)"]
+    end
+
+    subgraph Broker["Message Broker (RabbitMQ / Kafka)"]
+        T_BAR["topic:\nevent.bar"]
+        T_SIG["topic:\nevent.signal"]
+        T_SORD["topic:\nevent.suggested_order"]
+        T_ORD["topic:\nevent.order"]
+        T_FILL["topic:\nevent.fill"]
+        T_STATE["topic:\nevent.account_state"]
+        T_CMD["topic:\ncommand.*"]
+        T_RESP["topic:\nresponse.*"]
+    end
+
+    subgraph P2["Process 2: SignalEngine"]
+        SE3["SignalEngine\n+ LocalStateCache"]
+    end
+
+    subgraph P3["Process 3: SizingEngine"]
+        SZ3["SizingEngine\n+ LocalStateCache"]
+    end
+
+    subgraph P4["Process 4: RiskEngine"]
+        RE3["RiskEngine"]
+    end
+
+    subgraph P5["Process 5: ExecutionEngine"]
+        EE3["ExecutionEngine\n(Simulator / Live Broker)"]
+    end
+
+    subgraph P6["Process 6: Portfolio"]
+        PORT3["Portfolio\n+ TradeArchiver"]
+    end
+
+    DP3 -->|"BarEvent"| T_BAR
+    T_BAR --> SE3
+    T_BAR --> PORT3
+
+    SE3 -->|"SignalEvent"| T_SIG
+    T_SIG --> SZ3
+
+    SZ3 -->|"SuggestedOrderEvent"| T_SORD
+    T_SORD --> RE3
+
+    RE3 -->|"OrderEvent"| T_ORD
+    T_ORD --> EE3
+
+    EE3 -->|"FillEvent"| T_FILL
+    T_FILL --> PORT3
+
+    EE3 -->|"AccountStateEvent"| T_STATE
+    T_STATE --> SE3
+    T_STATE --> SZ3
+    T_STATE --> PORT3
+
+    SE3 -.->|"ClosePositionsCommand"| T_CMD
+    T_CMD -.-> EE3
+    EE3 -.->|"ClosePositionsResponse"| T_RESP
+    T_RESP -.-> SE3
+
+    style T_BAR fill:#2196F3,color:#fff
+    style T_SIG fill:#FF9800,color:#fff
+    style T_SORD fill:#FF9800,color:#fff
+    style T_ORD fill:#9C27B0,color:#fff
+    style T_FILL fill:#F44336,color:#fff
+    style T_STATE fill:#4CAF50,color:#fff
+    style T_CMD fill:#607D8B,color:#fff
+    style T_RESP fill:#607D8B,color:#fff
+```
+
+## Recommended Hybrid Architecture
+
+A pragmatic middle ground: distribute only at genuine I/O boundaries, keep tight computation pipelines in one process.
+
+```mermaid
+flowchart LR
+    subgraph PA["Process A: Market Data"]
+        DP4["DataProvider\n(API / WebSocket / CSV)"]
+    end
+
+    subgraph MQ["Message Broker"]
+        Q1["bars"]
+        Q2["orders"]
+        Q3["fills + state"]
+    end
+
+    subgraph PB["Process B: Strategy (single process)"]
+        direction TB
+        SE4["SignalEngine"]
+        SZ4["SizingEngine"]
+        RE4["RiskEngine"]
+        SC4["ScheduleService"]
+        SE4 -->|"sync"| SZ4
+        SZ4 -->|"sync"| RE4
+    end
+
+    subgraph PC["Process C: Execution"]
+        EE4["ExecutionEngine\n(Simulator / Broker)"]
+    end
+
+    subgraph PD["Process D: Monitoring"]
+        PORT4["Portfolio\n+ TradeArchiver\n+ Dashboard"]
+    end
+
+    DP4 -->|"BarEvent"| Q1
+    Q1 --> PB
+    PB -->|"OrderEvent"| Q2
+    Q2 --> EE4
+    EE4 -->|"FillEvent +\nAccountState"| Q3
+    Q3 --> PB
+    Q3 --> PD
+
+    style PA fill:#81C784,color:#000
+    style PB fill:#81C784,color:#000
+    style PC fill:#81C784,color:#000
+    style PD fill:#81C784,color:#000
+    style Q1 fill:#FFC107,color:#000
+    style Q2 fill:#FFC107,color:#000
+    style Q3 fill:#FFC107,color:#000
+```
+
+## Component Contracts & Protocols
+
+Each box is a **contract** (what the component must implement). Each arrow is a **protocol** (what message flows between them and what each side expects).
+
+```mermaid
+flowchart TD
+    subgraph Contracts["Contract Boundaries"]
+        direction TB
+
+        subgraph DP_C["IDataProvider Contract"]
+            DP_M1["update_bars() → emits BarEvent"]
+            DP_M2["get_latest_bars(symbol, tf, count) → DataFrame"]
+            DP_M3["get_latest_tick(symbol) → dict"]
+            DP_M4["get_latest_bid/ask(symbol) → Decimal"]
+        end
+
+        subgraph SE_C["ISignalEngine Contract"]
+            SE_M1["generate_signal(bar, modules)\n→ SignalEvent | list | None"]
+        end
+
+        subgraph SZ_C["ISizingEngine Contract"]
+            SZ_M1["get_suggested_order(signal, modules)\n→ SuggestedOrder"]
+        end
+
+        subgraph RE_C["IRiskEngine Contract"]
+            RE_M1["assess_order(suggested_order, modules)\n→ float (volume or 0)"]
+        end
+
+        subgraph EE_C["IExecutionEngine Contract"]
+            EE_M1["_send_market_order(order) → OrderSendResult"]
+            EE_M2["_send_pending_order(order) → OrderSendResult"]
+            EE_M3["close_position(ticket) → OrderSendResult"]
+            EE_M4["_update_values_and_check_executions_and_fills(bar)"]
+            EE_M5["_get_account_balance/equity() → Decimal"]
+            EE_M6["_get_strategy_positions() → tuple[OpenPosition]"]
+        end
+
+        subgraph PF_C["IPortfolio Contract"]
+            PF_M1["_update_portfolio(bar) → None"]
+            PF_M2["get_positions(symbol) → tuple[OpenPosition]"]
+            PF_M3["get_account_balance/equity() → Decimal"]
+        end
+
+        subgraph TA_C["ITradeArchiver Contract"]
+            TA_M1["archive_trade(fill) → None"]
+            TA_M2["export_csv/parquet/dataframe()"]
+        end
+    end
+
+    DP_C -->|"BarEvent\n(protocol: chronological,\naligned, no lookahead)"| SE_C
+    SE_C -->|"SignalEvent\n(protocol: must set strategy_id,\nsl if RiskPctSizing)"| SZ_C
+    SZ_C -->|"SuggestedOrder\n(protocol: volume respects\nsymbol limits)"| RE_C
+    RE_C -->|"OrderEvent\n(protocol: only if\nvolume > 0)"| EE_C
+    EE_C -->|"FillEvent\n(protocol: must populate\nall cost fields)"| TA_C
+    EE_C -->|"FillEvent +\nstate updates"| PF_C
+
+    style DP_C fill:#2196F3,color:#fff
+    style SE_C fill:#FF9800,color:#fff
+    style SZ_C fill:#FF9800,color:#fff
+    style RE_C fill:#FF9800,color:#fff
+    style EE_C fill:#9C27B0,color:#fff
+    style PF_C fill:#4CAF50,color:#fff
+    style TA_C fill:#4CAF50,color:#fff
+```
+
+## Multi-Provider & Multi-Broker Patterns
+
+How to extend the architecture with multiple data sources and brokers.
+
+```mermaid
+flowchart LR
+    subgraph DataProviders["Multiple Data Providers (same IDataProvider contract)"]
+        CSV["CSVDataProvider\n(backtest)"]
+        MT5D["MT5LiveDataProvider\n(forex live)"]
+        BIN["BinanceDataProvider\n(crypto)"]
+        YAHOO["YahooDataProvider\n(equities)"]
+    end
+
+    COMP["CompositeDataProvider\nroutes by symbol"]
+
+    CSV --> COMP
+    MT5D --> COMP
+    BIN --> COMP
+    YAHOO --> COMP
+
+    COMP -->|"BarEvent"| BUS[("Message Bus")]
+
+    subgraph Strategy["Signal + Sizing + Risk\n(same process)"]
+        SE5["SignalEngine"]
+        SZ5["SizingEngine"]
+        RE5["RiskEngine"]
+    end
+
+    BUS --> Strategy
+
+    Strategy -->|"OrderEvent"| BUS
+
+    subgraph Brokers["Multiple Brokers (same IExecutionEngine contract)"]
+        MT5E["MT5 Broker\n(forex)"]
+        IBKR["IBKR Broker\n(equities)"]
+        BINE["Binance Broker\n(crypto)"]
+    end
+
+    ROUTER["RoutingExecutionEngine\nroutes by symbol"]
+
+    BUS --> ROUTER
+    ROUTER --> MT5E
+    ROUTER --> IBKR
+    ROUTER --> BINE
+
+    MT5E -->|"FillEvent"| BUS
+    IBKR -->|"FillEvent"| BUS
+    BINE -->|"FillEvent"| BUS
+
+    subgraph MultiAccount["Multi-Account (same broker, multiple configs)"]
+        ACC1["MT5 Account A\n(conservative)"]
+        ACC2["MT5 Account B\n(aggressive)"]
+    end
+
+    MT5E --> ACC1
+    MT5E --> ACC2
+
+    style COMP fill:#2196F3,color:#fff
+    style ROUTER fill:#9C27B0,color:#fff
+    style BUS fill:#FFC107,color:#000
+    style CSV fill:#E3F2FD,color:#000
+    style MT5D fill:#E3F2FD,color:#000
+    style BIN fill:#E3F2FD,color:#000
+    style YAHOO fill:#E3F2FD,color:#000
+    style MT5E fill:#E8D5F5,color:#000
+    style IBKR fill:#E8D5F5,color:#000
+    style BINE fill:#E8D5F5,color:#000
+    style ACC1 fill:#F3E5F5,color:#000
+    style ACC2 fill:#F3E5F5,color:#000
 ```
