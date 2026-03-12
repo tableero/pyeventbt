@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls /home/user/workspace/oruizrui/pyeventbt/docs/pyeventbt.risk_engine* /home/user/workspace/oruizrui/pyeventbt/docs/pyeventbt.execution_engine* 2>/dev/null | sort)"
+      "Bash(ls /home/user/workspace/oruizrui/pyeventbt/docs/pyeventbt.risk_engine* /home/user/workspace/oruizrui/pyeventbt/docs/pyeventbt.execution_engine* 2>/dev/null | sort)",
+      "Bash(grep -rn \"def.*modules.*Modules\" /home/user/workspace/oruizrui/pyeventbt/example*.py)",
+      "Bash(find /home/user/workspace/oruizrui/pyeventbt/pyeventbt -name \"*execution*\" -type f | grep -E \"\\\\.py$\")",
+      "Bash(/tmp/check_deps.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(git -C /home/user/workspace/oruizrui/pyeventbt log --oneline -10)",
+      "Bash(find /home/user/workspace/oruizrui/pyeventbt -maxdepth 3 -name \"test_*.py\" -o -name \"*_test.py\" 2>/dev/null | head -20)",
+      "WebSearch"
     ]
   }
 }

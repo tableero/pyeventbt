@@ -1,6 +1,6 @@
 # PyEventBT — Complete Technical Documentation
 
-**Version:** 0.0.4 | **Python:** ≥3.12 | **License:** Apache 2.0
+**Version:** 0.0.5 | **Python:** ≥3.12 | **License:** Apache 2.0
 **Authors:** Marti Castany, Alain Porto
 
 ---
@@ -33,6 +33,14 @@
 24. [CSV Data Format](#24-csv-data-format)
 25. [Event Loop — Full Execution Flow](#25-event-loop--full-execution-flow)
 26. [Architecture Constraints and Rules](#26-architecture-constraints-and-rules)
+27. [Core Design Pattern — Understanding and Reusing the Event-Driven Architecture](docs/design_pattern.md)
+28. [Architecture Limitations & Distributed Migration Guide](docs/distributed_migration.md)
+29. [Component Contracts, Behaviors & Protocols](docs/contracts_protocols.md)
+30. [Technical Review — Dependencies, Architecture & Runtime Issues](docs/technical_review.md)
+31. [Industry Research — Event-Driven Trading Architectures & Process Separation](docs/industry_research.md)
+32. [Architecture Comparison — Industry Research vs PyEventBT](docs/architecture_comparison.md)
+33. [Implementation Guide — From Design to Working Code](docs/implementation_guide.md)
+34. [Contract, Behavior & Protocol Diagrams](docs/cbp_diagrams.md)
 
 ---
 
@@ -2090,3 +2098,22 @@ end of data (StopIteration on all generators)
 15. **`Modules` is a Pydantic model with `arbitrary_types_allowed = True`** to support `IDataProvider`, `IExecutionEngine`, and `IPortfolio` interface types.
 
 16. **Rollover support.** `SignalEvent.rollover` tuple `(True, "old_contract", "new_contract")` is passed through to the execution engine to handle futures contract rollovers. Currently propagated but the rollover logic is in the execution connectors.
+
+---
+
+## 27–31. Extended Documentation (Split into Separate Files)
+
+The following sections have been extracted into standalone documents for easier navigation:
+
+| Section | File | Description |
+|---|---|---|
+| **27. Core Design Pattern** | [`docs/design_pattern.md`](docs/design_pattern.md) | The event-driven pattern explained, integration guide, minimal skeleton code |
+| **28. Architecture Limitations & Migration** | [`docs/distributed_migration.md`](docs/distributed_migration.md) | Coupling analysis, 5-step migration path, distributed target architecture |
+| **29. Contracts, Behaviors & Protocols** | [`docs/contracts_protocols.md`](docs/contracts_protocols.md) | Formal specs for every component, multi-broker/multi-provider patterns, checklists |
+| **30. Technical Review** | [`docs/technical_review.md`](docs/technical_review.md) | All known issues by severity, dependency analysis, prioritized fix backlog |
+| **31. Industry Research** | [`docs/industry_research.md`](docs/industry_research.md) | LMAX, NautilusTrader, LEAN, framework comparison, process separation patterns |
+
+See also:
+- [`docs/event_flow_diagram.md`](docs/event_flow_diagram.md) — 10 mermaid diagrams covering the full event pipeline
+- [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — Functional requirements and known gaps (sections 19–21)
+- [`docs/EXAMPLES_COOKBOOK.md`](docs/EXAMPLES_COOKBOOK.md) — 17 practical strategy patterns
