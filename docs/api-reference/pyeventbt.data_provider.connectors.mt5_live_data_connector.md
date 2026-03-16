@@ -117,12 +117,19 @@ Returns `get_latest_bar(symbol, timeframe).datetime`.
 
 ##### `update_bars(self) -> list[BarEvent]`
 
-Polls all symbol x timeframe combinations. For each:
-1. Calls `get_latest_bar(symbol, timeframe)`.
-2. If `None`, skips.
-3. If bar datetime is newer than `last_bar_tf_datetime[symbol][timeframe]`, updates tracking and calls `get_latest_bar` **again** to append the event.
+This is the core method for **live bar detection**. It is called by the `TradingDirector` on every loop iteration when the event queue is empty (i.e., every `heartbeat` seconds).
 
-**Returns:** `list[BarEvent]` (may be empty if no new bars).
+**How it detects new closed candles:**
+
+The system does not receive push notifications from MT5. Instead, `update_bars` uses a **polling + timestamp comparison** approach:
+
+1. Iterates over every `symbol × timeframe` combination.
+2. Calls `get_latest_bar(symbol, timeframe)`, which internally uses `mt5.copy_rates_from_pos(symbol, tf, from_pos=1, count=1)`. The `from_pos=1` is critical — position `0` is the currently forming (incomplete) candle, position `1` is the most recently **closed** (complete) candle. This guarantees the system never processes an incomplete bar.
+3. Compares the returned bar's datetime against `last_bar_tf_datetime[symbol][timeframe]` (the timestamp of the last bar already seen for that pair).
+4. If the new bar's datetime is **newer** → a new candle has closed → updates the stored datetime and appends a `BarEvent` to the return list.
+5. If the datetime is the **same** → no new candle yet → skips.
+
+**Returns:** `list[BarEvent]` (may be empty if no new bars across any symbol/timeframe).
 
 ---
 

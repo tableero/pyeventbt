@@ -170,15 +170,15 @@ Registers a scheduled callback via `SCHEDULE_SERVICE.add_schedule`.
 
 #### `_run_live_trading() -> None`
 
-**Description**: Live trading event loop.
+**Description**: Live trading event loop. Detects new closed candles by **polling** MT5 at a configurable interval — the system does not receive push notifications when a bar closes.
 
 **Algorithm**:
 1. If `run_schedules` is `False`, deactivates all schedules
 2. Infinite loop:
    - Try to dequeue an event (non-blocking)
-   - On `queue.Empty`, call `DATA_PROVIDER.update_bars()`
+   - On `queue.Empty`, call `DATA_PROVIDER.update_bars()` — this polls MT5 for the last closed bar (`from_pos=1`) per symbol/timeframe and emits `BarEvent`s only when a new bar datetime is detected (see `Mt5LiveDataProvider.update_bars` for details)
    - On valid event, dispatch via `event_handlers_dict[event.type](event)`
-   - Sleep for `heartbeat` seconds
+   - Sleep for `heartbeat` seconds — this controls the polling frequency and determines the worst-case latency between a candle closing and the system reacting to it
 
 ## Data Flow
 
