@@ -300,11 +300,11 @@ class Strategy:
             end_date: datetime = datetime.now(),
             backtest_name: str = "Backtests",
             symbols_to_trade: list[str] = ['EURUSD'],
-            csv_dir: str = None,
+            csv_dir: str|None = None,
             run_scheduled_taks: bool = False,
             export_backtest_csv: bool = False,
             export_backtest_parquet: bool = True,
-            backtest_results_dir: str = None
+            backtest_results_dir: str|None = None
         ):
         # the queue is instantited here to avoid problems when performing a backtest inside a backtest.
         self.EVENTS_QUEUE = Queue() 

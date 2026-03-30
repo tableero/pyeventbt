@@ -16,10 +16,11 @@ from pyeventbt import (
     Modules,
     StrategyTimeframes,
     PassthroughRiskConfig,
-    MinSizingConfig,
-    Mt5PlatformConfig,
+    MinSizingConfig
 )
+from pyeventbt.events.events import OrderType, SignalType
 from pyeventbt.indicators.indicators import BollingerBands
+from pyeventbt.strategy.core.account_currencies import AccountCurrencies
 
 from datetime import datetime, time
 from decimal import Decimal
@@ -52,7 +53,7 @@ order_placement_minute = 0
 
 # Daily tracking
 orders_placed_today: dict[str, bool] = {symbol: False for symbol in symbols_to_trade}
-current_trading_date: dict[str, datetime] = {symbol: None for symbol in symbols_to_trade}
+current_trading_date: dict[str, datetime|None] = {symbol: None for symbol in symbols_to_trade}
 
 
 @strategy.custom_signal_engine(strategy_id=strategy_id, strategy_timeframes=strategy_timeframes)
@@ -128,8 +129,8 @@ def bbands_breakout(event: BarEvent, modules: Modules):
             symbol=symbol,
             time_generated=time_generated,
             strategy_id=strategy_id,
-            signal_type="BUY",
-            order_type="STOP",
+            signal_type=SignalType.BUY,
+            order_type=OrderType.STOP,
             order_price=upper_breakout,
             sl=Decimal(str(0.0)),
             tp=Decimal(str(0.0)),
@@ -140,8 +141,8 @@ def bbands_breakout(event: BarEvent, modules: Modules):
             symbol=symbol,
             time_generated=time_generated,
             strategy_id=strategy_id,
-            signal_type="SELL",
-            order_type="STOP",
+            signal_type=SignalType.SELL,
+            order_type=OrderType.STOP,
             order_price=lower_breakout,
             sl=Decimal(str(0.0)),
             tp=Decimal(str(0.0)),
@@ -173,7 +174,7 @@ backtest = strategy.backtest(
     end_date=to_date,
     export_backtest_csv=True,
     export_backtest_parquet=False,
-    account_currency='USD'
+    account_currency=AccountCurrencies.USD
 )
 
 print("Backtest finished")

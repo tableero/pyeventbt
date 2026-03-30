@@ -14,7 +14,7 @@ Indicators Module
 Technical indicators for trading strategies.
 
 Usage:
-    from pyeventbt.indicators import ATR, KAMA, SMA, EMA
+    from pyeventbt.indicators import ATR, KAMA, SMA, EMA, TRIX, DeMarker, RVI
     
     # Or access via the indicators module
     from pyeventbt import indicators
@@ -23,11 +23,14 @@ Usage:
     ema_values = indicators.EMA.compute(close, period=20)
 """
 
-from .indicators import ATR, KAMA, SMA, EMA
+from .indicators import ATR, KAMA, SMA, EMA, TRIX, DeMarker, RVI
 
 __all__ = [
     "ATR",
     "KAMA",
     "SMA",
     "EMA",
+    "TRIX",
+    "DeMarker",
+    "RVI",
 ]

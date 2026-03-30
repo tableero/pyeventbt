@@ -35,76 +35,143 @@ from pyeventbt import (
     Modules,
     StrategyTimeframes,
     PassthroughRiskConfig,
-    MinSizingConfig,
+    MinSizingConfig
 )
+from pyeventbt.events.events import OrderType, SignalType
+from pyeventbt.strategy.core.account_currencies import AccountCurrencies
 from pyeventbt.indicators import SMA
+
 from datetime import datetime
+from decimal import Decimal
+import logging
 
-# Create strategy
-strategy = Strategy()
-strategy_id = "1234" # Must be a string of numbers, equivalent to MT5 Magic Number
+logger = logging.getLogger("pyeventbt")
 
-@strategy.custom_signal_engine(
-    strategy_id=strategy_id,
-    strategy_timeframes=[StrategyTimeframes.ONE_HOUR]
-)
-def my_strategy(event: BarEvent, modules: Modules):
-    """Simple moving average crossover strategy"""
-    bars = modules.DATA_PROVIDER.get_latest_bars(event.symbol, StrategyTimeframes.ONE_HOUR, 50)
-    if bars is None or bars.height < 50:
-        return []
+# Strategy Configuration
+strategy_id = "123456"
+strategy = Strategy(logging_level=logging.INFO)
+
+# Timeframes
+signal_timeframe = StrategyTimeframes.ONE_DAY
+
+strategy_timeframes = [signal_timeframe]
+
+# Trading Configuration
+symbols_to_trade = ['EURUSD']
+starting_capital = 100000
+
+# Strategy Parameters
+fast_ma_period = 10
+slow_ma_period = 30
+
+@strategy.custom_signal_engine(strategy_id=strategy_id, strategy_timeframes=strategy_timeframes)
+def ma_crossover_strategy(event: BarEvent, modules: Modules):
+    """
+    Moving Average Dominance Strategy:
+    - Stay long while fast MA is above slow MA
+    - Stay short while fast MA is below slow MA
+    - Flat (or hold current) when both averages equal
+    - Always maintain at most one open position
+    """
     
-    close = bars.select('close').to_numpy().flatten()
-    fast_ma, slow_ma = SMA.compute(close, 10)[-1], SMA.compute(close, 30)[-1]
+    if event.timeframe != signal_timeframe:
+        return
     
-    open_pos = modules.PORTFOLIO.get_number_of_strategy_open_positions_by_symbol(event.symbol)
-    signal_type = ""
+    symbol = event.symbol
+
+    signal_events = []
     
-    if fast_ma > slow_ma and open_pos['LONG'] == 0:
-        if open_pos['SHORT'] > 0:
-            modules.EXECUTION_ENGINE.close_strategy_short_positions_by_symbol(event.symbol)
-        signal_type = "BUY"
-    elif fast_ma < slow_ma and open_pos['SHORT'] == 0:
-        if open_pos['LONG'] > 0:
-            modules.EXECUTION_ENGINE.close_strategy_long_positions_by_symbol(event.symbol)
-        signal_type = "SELL"
+    # Get bars for MA calculation
+    bars_needed = slow_ma_period + 10
+    bars = modules.DATA_PROVIDER.get_latest_bars(symbol, signal_timeframe, bars_needed)
     
-    if not signal_type:
-        return []
+    if bars is None or bars.height < bars_needed:
+        return
     
-    tick = modules.DATA_PROVIDER.get_latest_tick(event.symbol)
-    return [SignalEvent(
-        symbol=event.symbol,
-        time_generated=event.datetime,
+    # Calculate moving averages
+    close_prices = bars.select('close').to_numpy().flatten()
+    fast_ma_values = SMA.compute(close_prices, fast_ma_period)
+    slow_ma_values = SMA.compute(close_prices, slow_ma_period)
+    
+    current_fast_ma = fast_ma_values[-1]
+    current_slow_ma = slow_ma_values[-1]
+    
+    # Determine desired position state
+    if current_fast_ma > current_slow_ma:
+        desired_position = "LONG"
+    elif current_fast_ma < current_slow_ma:
+        desired_position = "SHORT"
+    else:
+        return
+
+    # Check current positions (at current bar time - no lookahead)
+    open_positions = modules.PORTFOLIO.get_number_of_strategy_open_positions_by_symbol(symbol)
+    
+    signal_type = None
+    
+    
+    # Signal generation
+    if open_positions['LONG'] == 0 and desired_position == "LONG":
+        if open_positions['SHORT'] > 0:
+            modules.EXECUTION_ENGINE.close_strategy_short_positions_by_symbol(symbol)
+        signal_type = SignalType.BUY
+
+    if open_positions['SHORT'] == 0 and desired_position == "SHORT":
+        if open_positions['LONG'] > 0:
+            modules.EXECUTION_ENGINE.close_strategy_long_positions_by_symbol(symbol)
+        signal_type = SignalType.SELL
+    
+    if signal_type == None:
+        return
+    
+    # Time for signal generation (for NEXT bar)
+    if modules.TRADING_CONTEXT == "BACKTEST":
+        time_generated = event.datetime + signal_timeframe.to_timedelta()
+    else:
+        time_generated = datetime.now()
+
+    last_tick = modules.DATA_PROVIDER.get_latest_tick(symbol)
+    
+    # Generate signals based on desired position
+    signal_events.append(SignalEvent(
+        symbol=symbol,
+        time_generated=time_generated,
         strategy_id=strategy_id,
         signal_type=signal_type,
-        order_type="MARKET",
-        order_price=tick['ask'] if signal_type == "BUY" else tick['bid'],
-        sl=0.0,
-        tp=0.0,
-    )]
+        order_type=OrderType.MARKET,
+        order_price=last_tick['ask'] if signal_type == SignalType.BUY else last_tick['bid'],
+        sl=Decimal(str(0.0)),
+        tp=Decimal(str(0.0)),
+    ))
+    
+    return signal_events
 ```
 
 ### 2. Configure and Run Backtest
 
 ```python
-# Configure risk and sizing
+
+# Configure Strategy
 strategy.configure_predefined_sizing_engine(MinSizingConfig())
 strategy.configure_predefined_risk_engine(PassthroughRiskConfig())
 
-# Run backtest
+# Backtest Configuration
+from_date = datetime(year=2020, month=1, day=1)
+to_date = datetime(year=2023, month=12, day=1)
+# csv_dir = './data' # Change it with your own path to the CSV data
+csv_dir = None # If you don't have CSV data, you can set this to None
+
+# Launch Backtest
 backtest = strategy.backtest(
     strategy_id=strategy_id,
-    initial_capital=100000,
-    symbols_to_trade=['EURUSD'],
-    csv_dir=None,
-    backtest_name="example",
-    start_date=datetime(2020, 1, 1),
-    end_date=datetime(2023, 12, 31),
-    account_currency='USD',
-    export_backtest_csv=False,
-    export_backtest_parquet=True,
-    backtest_results_dir=None,  # Defaults to Desktop/PyEventBT/backtest_results
+    initial_capital=starting_capital,
+    symbols_to_trade=symbols_to_trade,
+    csv_dir=csv_dir,
+    backtest_name=strategy_id,
+    start_date=from_date,
+    end_date=to_date,
+    export_backtest_parquet=False,
+    account_currency=AccountCurrencies.USD
 )
 
 backtest.plot()
@@ -122,10 +189,11 @@ from pyeventbt import (
     Modules,
     StrategyTimeframes,
     PassthroughRiskConfig,
-    MinSizingConfig,
-    Mt5PlatformConfig,
+    MinSizingConfig
 )
+from pyeventbt.events.events import OrderType, SignalType
 from pyeventbt.indicators.indicators import BollingerBands
+from pyeventbt.strategy.core.account_currencies import AccountCurrencies
 
 from datetime import datetime, time
 from decimal import Decimal
@@ -158,7 +226,7 @@ order_placement_minute = 0
 
 # Daily tracking
 orders_placed_today: dict[str, bool] = {symbol: False for symbol in symbols_to_trade}
-current_trading_date: dict[str, datetime] = {symbol: None for symbol in symbols_to_trade}
+current_trading_date: dict[str, datetime|None] = {symbol: None for symbol in symbols_to_trade}
 
 
 @strategy.custom_signal_engine(strategy_id=strategy_id, strategy_timeframes=strategy_timeframes)
@@ -234,8 +302,8 @@ def bbands_breakout(event: BarEvent, modules: Modules):
             symbol=symbol,
             time_generated=time_generated,
             strategy_id=strategy_id,
-            signal_type="BUY",
-            order_type="STOP",
+            signal_type=SignalType.BUY,
+            order_type=OrderType.STOP,
             order_price=upper_breakout,
             sl=Decimal(str(0.0)),
             tp=Decimal(str(0.0)),
@@ -246,8 +314,8 @@ def bbands_breakout(event: BarEvent, modules: Modules):
             symbol=symbol,
             time_generated=time_generated,
             strategy_id=strategy_id,
-            signal_type="SELL",
-            order_type="STOP",
+            signal_type=SignalType.SELL,
+            order_type=OrderType.STOP,
             order_price=lower_breakout,
             sl=Decimal(str(0.0)),
             tp=Decimal(str(0.0)),
@@ -265,7 +333,8 @@ strategy.configure_predefined_risk_engine(PassthroughRiskConfig())
 # Backtest Configuration
 from_date = datetime(year=2020, month=1, day=1)
 to_date = datetime(year=2023, month=12, day=1)
-csv_dir = None # '/path/to/your/data' or None for default dataset
+# csv_dir = '/Users/marticastany/Desktop/long_data' # Change it with your own path to the CSV data
+csv_dir = None # If you don't have CSV data, you can set this to None
 
 # Launch Backtest
 backtest = strategy.backtest(
@@ -278,7 +347,7 @@ backtest = strategy.backtest(
     end_date=to_date,
     export_backtest_csv=True,
     export_backtest_parquet=False,
-    account_currency='USD'
+    account_currency=AccountCurrencies.USD
 )
 
 print("Backtest finished")

@@ -26,12 +26,13 @@ from pyeventbt import (
     MinSizingConfig,
     QuantdleDataUpdater,
 )
+from pyeventbt.events.events import OrderType, SignalType
+from pyeventbt.strategy.core.account_currencies import AccountCurrencies
 from pyeventbt.indicators import SMA
 
 from datetime import datetime
 from decimal import Decimal
 import logging
-import numpy as np
 
 logger = logging.getLogger("pyeventbt")
 
@@ -44,7 +45,7 @@ QUANTDLE_API_KEY = "your_api_key_here"
 QUANTDLE_API_KEY_ID = "your_api_key_id_here"
 
 # Where to store/cache CSV files
-csv_dir = '/Users/marticastany/Desktop/quantdle_cache'
+csv_dir = './data'
 
 # Backtest parameters
 symbols_to_trade = ['EURUSD']
@@ -78,7 +79,7 @@ print("="*80 + "\n")
 # STEP 3: DEFINE YOUR STRATEGY (MA Crossover)
 # =============================================================================
 
-strategy_id = "quantdle_ma_crossover"
+strategy_id = "1234"
 strategy = Strategy(logging_level=logging.INFO)
 
 # Timeframes
@@ -132,20 +133,20 @@ def ma_crossover_strategy(event: BarEvent, modules: Modules):
     # Check current positions (at current bar time - no lookahead)
     open_positions = modules.PORTFOLIO.get_number_of_strategy_open_positions_by_symbol(symbol)
     
-    signal_type = ""
+    signal_type = None
     
     # Signal generation
     if open_positions['LONG'] == 0 and desired_position == "LONG":
         if open_positions['SHORT'] > 0:
             modules.EXECUTION_ENGINE.close_strategy_short_positions_by_symbol(symbol)
-        signal_type = "BUY"
+        signal_type = SignalType.BUY
 
     if open_positions['SHORT'] == 0 and desired_position == "SHORT":
         if open_positions['LONG'] > 0:
             modules.EXECUTION_ENGINE.close_strategy_long_positions_by_symbol(symbol)
-        signal_type = "SELL"
+        signal_type = SignalType.SELL
     
-    if signal_type == "":
+    if signal_type == None:
         return
     
     # Time for signal generation (for NEXT bar)
@@ -162,7 +163,7 @@ def ma_crossover_strategy(event: BarEvent, modules: Modules):
         time_generated=time_generated,
         strategy_id=strategy_id,
         signal_type=signal_type,
-        order_type="MARKET",
+        order_type=OrderType.MARKET,
         order_price=last_tick['ask'] if signal_type == "BUY" else last_tick['bid'],
         sl=Decimal(str(0.0)),
         tp=Decimal(str(0.0)),
@@ -187,8 +188,8 @@ backtest = strategy.backtest(
     backtest_name=strategy_id,
     start_date=from_date,
     end_date=to_date,
-    export_backtest_pickle=False,
-    account_currency='USD'
+    export_backtest_parquet=False,
+    account_currency=AccountCurrencies.USD
 )
 
 print("\nBacktest finished!")

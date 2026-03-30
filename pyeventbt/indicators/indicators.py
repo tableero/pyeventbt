@@ -1242,6 +1242,178 @@ class ROC(IIndicator):
         return ROC._ROC__compute_roc(close, period)
 
 
+class TRIX(IIndicator):
+    """Triple Exponential Moving Average Oscillator (TRIX) indicator."""
+    
+    @staticmethod
+    @njit
+    def __compute_trix(close: np.ndarray, period: int) -> np.ndarray:
+        """
+        Compute TRIX values using Numba for performance.
+        """
+        n = len(close)
+        trix = np.empty(n, dtype=np.float64)
+        trix[:] = np.nan
+        
+        multiplier = 2.0 / (period + 1)
+        
+        ema1 = np.empty(n, dtype=np.float64)
+        ema2 = np.empty(n, dtype=np.float64)
+        ema3 = np.empty(n, dtype=np.float64)
+        ema1[:] = np.nan
+        ema2[:] = np.nan
+        ema3[:] = np.nan
+        
+        # First EMA
+        sma1_sum = 0.0
+        for i in range(period):
+            sma1_sum += close[i]
+        ema1_value = sma1_sum / period
+        ema1_start = period - 1
+        ema1[ema1_start] = ema1_value
+        
+        for i in range(ema1_start + 1, n):
+            ema1_value = (close[i] - ema1_value) * multiplier + ema1_value
+            ema1[i] = ema1_value
+        
+        # Second EMA (EMA of EMA1)
+        sma2_sum = 0.0
+        for i in range(ema1_start, ema1_start + period):
+            sma2_sum += ema1[i]
+        ema2_value = sma2_sum / period
+        ema2_start = ema1_start + period - 1
+        ema2[ema2_start] = ema2_value
+        
+        for i in range(ema2_start + 1, n):
+            ema2_value = (ema1[i] - ema2_value) * multiplier + ema2_value
+            ema2[i] = ema2_value
+        
+        # Third EMA (EMA of EMA2)
+        sma3_sum = 0.0
+        for i in range(ema2_start, ema2_start + period):
+            sma3_sum += ema2[i]
+        ema3_value = sma3_sum / period
+        ema3_start = ema2_start + period - 1
+        ema3[ema3_start] = ema3_value
+        
+        for i in range(ema3_start + 1, n):
+            ema3_value = (ema2[i] - ema3_value) * multiplier + ema3_value
+            ema3[i] = ema3_value
+        
+        # TRIX as one-period percentage change of the triple-smoothed EMA
+        for i in range(ema3_start + 1, n):
+            prev = ema3[i - 1]
+            if prev != 0.0:
+                trix[i] = 100.0 * (ema3[i] - prev) / prev
+            else:
+                trix[i] = 0.0
+        
+        return trix
+    
+    @staticmethod
+    def compute(close: np.ndarray, period: int = 15) -> np.ndarray:
+        """Calculate the TRIX indicator values.
+        
+        Parameters:
+            close (np.ndarray): Close prices as a numpy array.
+            period (int): The EMA period for each of the three smoothing passes. Default is 15.
+        
+        Returns:
+            np.ndarray: The calculated TRIX indicator values as a numpy array (percentage).
+            
+        Usage:
+        ```python
+        close_prices = np.array([100, 102, 101, 103, 105, 104, 106, 108, 107, 109])
+        trix_values = TRIX.compute(close_prices, period=15)
+        ```
+        """
+        if period < 1:
+            raise ValueError("Period must be greater than 0.")
+        
+        min_length = 3 * period - 1
+        if len(close) < min_length:
+            raise ValueError(f"Close array length must be at least {min_length}")
+        
+        return TRIX._TRIX__compute_trix(close, period)
+
+
+class DeMarker(IIndicator):
+    """DeMarker indicator."""
+    
+    @staticmethod
+    @njit
+    def __compute_demarker(high: np.ndarray, low: np.ndarray, period: int) -> np.ndarray:
+        """
+        Compute DeMarker values using Numba for performance.
+        """
+        n = len(high)
+        demarker = np.empty(n, dtype=np.float64)
+        demarker[:] = np.nan
+        
+        demax = np.zeros(n, dtype=np.float64)
+        demin = np.zeros(n, dtype=np.float64)
+        
+        # Calculate DeMax and DeMin components
+        for i in range(1, n):
+            up_move = high[i] - high[i - 1]
+            down_move = low[i - 1] - low[i]
+            
+            if up_move > 0.0:
+                demax[i] = up_move
+            if down_move > 0.0:
+                demin[i] = down_move
+        
+        # Rolling SMA of DeMax and DeMin to form DeMarker
+        demax_sum = 0.0
+        demin_sum = 0.0
+        
+        for i in range(n):
+            demax_sum += demax[i]
+            demin_sum += demin[i]
+            
+            if i >= period:
+                demax_sum -= demax[i - period]
+                demin_sum -= demin[i - period]
+                
+                denominator = demax_sum + demin_sum
+                if denominator != 0.0:
+                    demarker[i] = demax_sum / denominator
+                else:
+                    demarker[i] = 0.5  # Neutral value when there is no movement
+        
+        return demarker
+    
+    @staticmethod
+    def compute(high: np.ndarray, low: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate the DeMarker indicator values.
+        
+        Parameters:
+            high (np.ndarray): High prices as a numpy array.
+            low (np.ndarray): Low prices as a numpy array.
+            period (int): The number of periods for DeMarker calculation. Default is 14.
+        
+        Returns:
+            np.ndarray: The calculated DeMarker values as a numpy array (range 0 to 1).
+            
+        Usage:
+        ```python
+        high_prices = np.array([102, 104, 103, 105, 107])
+        low_prices = np.array([100, 101, 100, 102, 104])
+        demarker_values = DeMarker.compute(high_prices, low_prices, period=14)
+        ```
+        """
+        if period < 1:
+            raise ValueError("Period must be greater than 0.")
+        
+        n = len(high)
+        if len(low) != n:
+            raise ValueError("High and low arrays must have the same length.")
+        if n < period + 1:
+            raise ValueError(f"Array length must be at least {period + 1}")
+        
+        return DeMarker._DeMarker__compute_demarker(high, low, period)
+
+
 class Aroon(IIndicator):
     """Aroon indicator (Aroon Up and Aroon Down)."""
     
@@ -1306,3 +1478,116 @@ class Aroon(IIndicator):
             raise ValueError(f"Array length must be at least {period + 1}")
         
         return Aroon._Aroon__compute_aroon(high, low, period)
+
+
+class RVI(IIndicator):
+    """Relative Vigor Index (RVI) indicator."""
+
+    @staticmethod
+    @njit
+    def __compute_rvi(open_: np.ndarray, high: np.ndarray, low: np.ndarray,
+                      close: np.ndarray, period: int) -> tuple:
+        """
+        Compute RVI and its signal line using Numba for performance.
+        Returns (rvi, signal)
+
+        Formula:
+            SWMA weights = [1, 2, 2, 1] / 6  (symmetric 4-bar weighted MA)
+            numerator[i]   = SWMA(close - open, i)
+            denominator[i] = SWMA(high - low, i)
+            RVI[i]         = SMA(numerator, period) / SMA(denominator, period)
+            signal[i]      = SWMA(RVI, i)
+        """
+        n = len(close)
+        rvi = np.empty(n, dtype=np.float64)
+        signal = np.empty(n, dtype=np.float64)
+        rvi[:] = np.nan
+        signal[:] = np.nan
+
+        # SWMA start index requires 3 preceding bars (indices 0-2 are warmup)
+        swma_start = 3
+
+        # Pre-compute SWMA of (close-open) and (high-low) at every valid bar
+        num_swma = np.empty(n, dtype=np.float64)
+        den_swma = np.empty(n, dtype=np.float64)
+        num_swma[:] = np.nan
+        den_swma[:] = np.nan
+
+        for i in range(swma_start, n):
+            co0 = close[i]     - open_[i]
+            co1 = close[i - 1] - open_[i - 1]
+            co2 = close[i - 2] - open_[i - 2]
+            co3 = close[i - 3] - open_[i - 3]
+            num_swma[i] = (co0 + 2.0 * co1 + 2.0 * co2 + co3) / 6.0
+
+            hl0 = high[i]     - low[i]
+            hl1 = high[i - 1] - low[i - 1]
+            hl2 = high[i - 2] - low[i - 2]
+            hl3 = high[i - 3] - low[i - 3]
+            den_swma[i] = (hl0 + 2.0 * hl1 + 2.0 * hl2 + hl3) / 6.0
+
+        # Rolling SMA of num_swma and den_swma over `period` bars
+        rvi_start = swma_start + period - 1
+        num_sum = 0.0
+        den_sum = 0.0
+
+        for i in range(swma_start, n):
+            num_sum += num_swma[i]
+            den_sum += den_swma[i]
+
+            j = i - swma_start  # how many elements have been summed so far
+            if j >= period:
+                num_sum -= num_swma[i - period]
+                den_sum -= den_swma[i - period]
+
+            if i >= rvi_start:
+                if den_sum != 0.0:
+                    rvi[i] = num_sum / den_sum
+                else:
+                    rvi[i] = 0.0
+
+        # Signal line: SWMA of RVI over 4 bars
+        for i in range(rvi_start + 3, n):
+            if (not np.isnan(rvi[i])     and not np.isnan(rvi[i - 1]) and
+                    not np.isnan(rvi[i - 2]) and not np.isnan(rvi[i - 3])):
+                signal[i] = (rvi[i] + 2.0 * rvi[i - 1] + 2.0 * rvi[i - 2] + rvi[i - 3]) / 6.0
+
+        return rvi, signal
+
+    @staticmethod
+    def compute(open_: np.ndarray, high: np.ndarray, low: np.ndarray,
+                close: np.ndarray, period: int = 10) -> tuple:
+        """Calculate the Relative Vigor Index (RVI) indicator values.
+
+        Parameters:
+            open_ (np.ndarray): Open prices as a numpy array.
+            high (np.ndarray): High prices as a numpy array.
+            low (np.ndarray): Low prices as a numpy array.
+            close (np.ndarray): Close prices as a numpy array.
+            period (int): The number of periods for the RVI SMA smoothing. Default is 10.
+
+        Returns:
+            tuple: (rvi, signal) as numpy arrays.
+
+        Usage:
+        ```python
+        open_prices  = np.array([100, 101, 102, 103, 104])
+        high_prices  = np.array([102, 103, 104, 105, 106])
+        low_prices   = np.array([99,  100, 101, 102, 103])
+        close_prices = np.array([101, 102, 103, 104, 105])
+        rvi_values, signal_values = RVI.compute(open_prices, high_prices, low_prices, close_prices, period=10)
+        ```
+        """
+        if period < 1:
+            raise ValueError("Period must be greater than 0.")
+
+        n = len(open_)
+        if len(high) != n or len(low) != n or len(close) != n:
+            raise ValueError("Open, high, low, and close arrays must have the same length.")
+
+        # Minimum: 3 bars for first SWMA + period bars for first SMA + 3 bars for signal SWMA
+        min_length = 3 + period + 3
+        if n < min_length:
+            raise ValueError(f"Array length must be at least {min_length}")
+
+        return RVI._RVI__compute_rvi(open_, high, low, close, period)
